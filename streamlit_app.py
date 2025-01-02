@@ -1,6 +1,8 @@
+# streamlit_app.py
 import os
 import glob
 import cv2
+import time
 import tempfile
 import argparse
 import numpy as np
@@ -10,7 +12,7 @@ import torch
 import streamlit as st
 import torchvision.transforms as T
 
-from model import SimpleSegmentationModel, NUM_CLASSES
+from model import FastSegmentationModel, NUM_CLASSES
 from dataset import CLASS_NAME_TO_ID
 
 # BGR color mapping for each class ID:
@@ -30,19 +32,11 @@ CLASS_COLORS = [
     (0, 128, 128)    # Katana Forceps
 ]
 
-def rgb_to_hex(bgr_tuple):
-    """Converts (B, G, R) into a #RRGGBB hex code."""
-    b, g, r = bgr_tuple
-    return f"#{r:02X}{g:02X}{b:02X}"
-
-def overlay_mask_on_image(image_rgb, mask_np, class_toggles):
-    """
-    Blends segmentation masks onto the original image with 50% opacity,
-    skipping any classes the user toggled off.
-    """
+def overlay_mask(image_rgb, mask_np, toggles):
+    """Overlays color-coded segmentation mask on the original frame."""
     out = image_rgb.copy()
     for cid in range(1, NUM_CLASSES):
-        if not class_toggles.get(cid, True):
+        if not toggles.get(cid, True):
             continue
         color = CLASS_COLORS[cid]
         idx = (mask_np == cid)
@@ -52,140 +46,136 @@ def overlay_mask_on_image(image_rgb, mask_np, class_toggles):
     return out.astype(np.uint8)
 
 def main(dataset_path="datasets/Cataract-1k/segmentation"):
-    st.title("Cataract Segmentation Demo")
-    st.markdown("Automatically segments **12 classes** (plus background) in cataract surgery frames.")
+    st.title("Real-time Cataract Segmentation")
+    st.markdown("**Play** a video and see real-time multi-class segmentation. Toggle classes below.")
 
-    # Load model
+    # load model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SimpleSegmentationModel().to(device)
+    model = FastSegmentationModel(num_classes=NUM_CLASSES).to(device)
     try:
         model.load_state_dict(torch.load("cataract_seg_model.pth", map_location=device))
         model.eval()
     except:
-        st.error("No trained model found. Please ensure 'cataract_seg_model.pth' is in the current directory.")
+        st.error("No trained model found! Please train and have 'cataract_seg_model.pth' present.")
         return
 
-    # Radio button: local or upload
-    choice = st.radio("Video Source:", ["Local Dataset Video", "Upload Video"], horizontal=True)
+    # user picks local or upload
+    choice = st.radio("Select Video Source:", ["Local Dataset", "Upload"], horizontal=True)
     video_file = None
-
-    if choice == "Local Dataset Video":
+    if choice == "Local Dataset":
         videos_dir = os.path.join(dataset_path, "videos")
-        local_videos = glob.glob(os.path.join(videos_dir, "*.mp4"))
-        if not local_videos:
-            st.error(f"No .mp4 files found in {videos_dir}")
+        mp4s = glob.glob(os.path.join(videos_dir, "*.mp4"))
+        if not mp4s:
+            st.error("No mp4 in videos folder!")
             return
-        video_file = st.selectbox("Select a .mp4 from dataset:", local_videos)
+        video_file = st.selectbox("Choose a local video", mp4s)
     else:
-        # Upload
-        uploaded_file = st.file_uploader("Upload a .mp4", type=["mp4"])
-        if uploaded_file:
+        uploaded = st.file_uploader("Upload a .mp4 video", type=["mp4"])
+        if uploaded:
             tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
-            tmp.write(uploaded_file.read())
+            tmp.write(uploaded.read())
             tmp.flush()
             video_file = tmp.name
         else:
-            st.info("Please upload a .mp4 video.")
+            st.info("Awaiting upload...")
             return
 
-    if video_file:
-        cap = cv2.VideoCapture(video_file)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        if total_frames <= 0:
-            st.error("Could not read frames from this video.")
-            cap.release()
-            return
+    # define toggles for classes
+    st.subheader("Toggle Classes")
+    # We'll skip background=0
+    id_to_name = {0: "Background"}
+    for k, v in CLASS_NAME_TO_ID.items():
+        id_to_name[v] = k
 
-        # Frame slider
-        frame_idx = st.slider("Frame Index", 0, total_frames - 1, 0, 1)
-
-        # Grab frame
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-        ret, frame_bgr = cap.read()
-        cap.release()
-
-        if not ret:
-            st.error("Failed to read frame from video.")
-            return
-
-        # Convert BGR -> RGB
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        h, w = frame_rgb.shape[:2]
-
-        # Prepare for model
-        resized = cv2.resize(frame_rgb, (512, 512), interpolation=cv2.INTER_LINEAR)
-        in_tensor = T.ToTensor()(Image.fromarray(resized))
-        in_tensor = T.Normalize(mean=(0.485, 0.456, 0.406),
-                                std=(0.229, 0.224, 0.225))(in_tensor)
-        in_tensor = in_tensor.unsqueeze(0).to(device)
-
-        # Inference
-        with torch.no_grad():
-            outputs = model(in_tensor)["out"]
-            pred_mask = torch.argmax(outputs, dim=1).squeeze(0).cpu().numpy()
-
-        # Resize mask back to original
-        pred_mask_up = cv2.resize(pred_mask.astype(np.uint8),
-                                  (w, h),
-                                  interpolation=cv2.INTER_NEAREST)
-
-        # ===============================
-        # Display segmented image FIRST
-        # ===============================
-        # We haven't toggled anything yet, so let's see toggles from last run (or default).
-        # We'll define toggles in a moment, so let's do a quick hack:
-        st.subheader(f"Frame {frame_idx} - Segmented Result")
-        st.write("Change toggles below to show/hide classes (auto-updates).")
-
-        # We'll define toggles after we show the image.
-
-        # Just store the result in Session State? Alternatively, we can do
-        # a two-pass approach, but let's keep it simple: We'll define toggles
-        # below, but toggles are read at the top of the script if we do so.
-
-        # Actually, let's define toggles with default (True) for everything except background.
-        # Then re-run after user changes them. This is how Streamlit works, it re-runs top to bottom.
-        # We'll do that after we define toggles. So let's do toggles now, after we show an empty image?
-
-        # Actually, let's just do the toggles next, re-run the entire code:
-        # That means we either need to overlay the toggles right now if they've been defined previously,
-        # or define them now. We'll define them after the image, as user asked. The code will re-run in real-time.
-
-        # For now, let's define toggles below this line,
-        # but we need to know if the user changed them or not. Let's do it as second step.
-
-        # We'll just keep a placeholder for the final image. We'll use a container to store the final image.
-        segmented_image_container = st.empty()  # placeholder for the segmented image
-
-        # =============================
-        #  BELOW THE IMAGE: legend + toggles
-        # =============================
-        st.subheader("Color Legend")
-        # We'll show each class color as a line
-        id_to_name = {0: "Background"}
-        for k, v in CLASS_NAME_TO_ID.items():
-            id_to_name[v] = k
-
-        for cid in range(NUM_CLASSES):
-            cname = id_to_name.get(cid, f"Unknown-{cid}")
-            color_hex = rgb_to_hex(CLASS_COLORS[cid])
-            # Show a small colored box + class name
-            st.markdown(f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:5px;'>"
-                        f"<div style='width:16px;height:16px;background-color:{color_hex};"
-                        f"border-radius:2px;'></div>"
-                        f"<span style='font-size:14px;'>{cid}: {cname}</span>"
-                        f"</div>", unsafe_allow_html=True)
-
-        st.subheader("Toggle Classes On/Off")
-        # toggles: background=0 usually not toggled because it's always "off" (the rest is real classes)
-        toggles = {}
-        for cid in range(1, NUM_CLASSES):
-            cname = id_to_name.get(cid, f"Class-{cid}")
+    toggles = {}
+    cols = st.columns(6)  # 6 checkboxes per row
+    # We have 12 togglable classes: let's do 2 rows if 6 columns
+    i = 0
+    for cid in range(1, NUM_CLASSES):
+        cname = id_to_name[cid]
+        with cols[i % 6]:
             toggles[cid] = st.checkbox(f"{cid}: {cname}", value=True)
+        i += 1
 
-        # Once toggles are set, overlay the mask
-        final_overlay = overlay_mask_on_image(frame_rgb, pred_mask_up, toggles)
-        segmented_image_container.image(final_overlay, channels="RGB", use_container_width=True)
+    if not video_file:
+        return
+
+    cap = cv2.VideoCapture(video_file)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0  # fallback to 25 if missing
+    st.write(f"Video has {total_frames} frames at {fps:.2f} FPS.")
+
+    # set up session_state
+    if "frame_idx" not in st.session_state:
+        st.session_state.frame_idx = 0
+    if "playing" not in st.session_state:
+        st.session_state.playing = False
+
+    # UI for controlling playback
+    play_pause_btn = st.button("Play/Pause", help="Toggle real-time playback")
+    if play_pause_btn:
+        st.session_state.playing = not st.session_state.playing
+
+    # manual slider if not playing
+    slider_val = st.slider("Frame Index (when paused)",
+                           min_value=0, max_value=total_frames-1,
+                           value=st.session_state.frame_idx,
+                           step=1)
+
+    # If user drags the slider while paused, update our state
+    if not st.session_state.playing:
+        st.session_state.frame_idx = slider_val
+
+    # container for images
+    frame_container = st.empty()
+
+    # If "playing" is True, we do a mini loop to read frames and update
+    # We'll only do a handful of frames each run (say 1 or so), then
+    # let Streamlit re-run. This is typical for "real-time" in Streamlit.
+    if st.session_state.playing:
+        # increment frame_idx by 1
+        st.session_state.frame_idx += 1
+        if st.session_state.frame_idx >= total_frames:
+            st.session_state.frame_idx = 0  # loop from start
+
+    # read the selected frame
+    cap.set(cv2.CAP_PROP_POS_FRAMES, st.session_state.frame_idx)
+    ret, frame_bgr = cap.read()
+    cap.release()
+
+    if not ret:
+        st.error("Failed to read frame from video.")
+        return
+
+    # do inference
+    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    original_h, original_w = frame_rgb.shape[:2]
+
+    resized = cv2.resize(frame_rgb, (512, 512), interpolation=cv2.INTER_LINEAR)
+    tens = T.ToTensor()(Image.fromarray(resized))
+    tens = T.Normalize(mean=(0.485,0.456,0.406),
+                       std=(0.229,0.224,0.225))(tens)
+    tens = tens.unsqueeze(0).to(device)
+
+    with torch.no_grad(), torch.cuda.amp.autocast(enabled=(device.type=="cuda")):
+        out = model(tens)["out"]
+        pred = torch.argmax(out, dim=1).squeeze(0).cpu().numpy()
+
+    # upscale mask
+    pred_up = cv2.resize(pred.astype(np.uint8),
+                         (original_w, original_h),
+                         interpolation=cv2.INTER_NEAREST)
+    # overlay
+    overlaid = overlay_mask(frame_rgb, pred_up, toggles)
+
+    frame_container.image(overlaid, channels="RGB", use_container_width=True,
+                          caption=f"Frame {st.session_state.frame_idx}/{total_frames-1}")
+
+    # If playing, sleep a bit, then rerun
+    if st.session_state.playing:
+        # small sleep based on FPS
+        time.sleep(1.0 / fps)
+        st.experimental_rerun()
 
 def run_app():
     parser = argparse.ArgumentParser()
