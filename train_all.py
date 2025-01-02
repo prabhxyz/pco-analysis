@@ -49,7 +49,7 @@ def train_segmentation(model, train_loader, val_loader, device, epochs=10, lr=1e
             masks = masks.to(device)
 
             optimizer.zero_grad()
-            with torch.amp.autocast(enabled=(device.type=="cuda")):
+            with torch.amp.autocast(device_type=device.type, enabled=(device.type=="cuda")):
                 out = model(imgs)["out"]
                 loss = criterion(out, masks)
 
@@ -91,7 +91,7 @@ def train_phase(model, train_loader, val_loader, device, epochs=10, lr=1e-4):
             label = label.to(device)
 
             optimizer.zero_grad()
-            with torch.amp.autocast(enabled=(device.type=="cuda")):
+            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
                 out = model(frames)
                 loss = criterion(out, label)
 
