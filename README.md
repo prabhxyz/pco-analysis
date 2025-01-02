@@ -1,5 +1,7 @@
 # Vision-Language Models To Prevent Posterior Capsule Opacification (PCO)
 
+### ⚠️ The project is currently a work in progress, and the README is outdated.
+
 ## Table of Contents
 
 - [Overview](#overview)
