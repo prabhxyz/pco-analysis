@@ -5,17 +5,25 @@ from torchvision.models.segmentation import DeepLabV3_MobileNet_V3_Large_Weights
 from torchvision.models import mobilenet_v3_large, MobileNet_V3_Large_Weights
 
 class LightweightSegModel(nn.Module):
-    def __init__(self, num_classes=13, use_pretrained=True):
+    def __init__(self, num_classes=13, use_pretrained=True, aux_loss=True):
+        """
+        num_classes: e.g. 13 for your instrument segmentation
+        use_pretrained: whether to load pretrained COCO weights
+        aux_loss: if True, includes the aux_classifier in the model
+                  so we can load that portion from the saved state_dict.
+        """
         super().__init__()
         if use_pretrained:
             weights = DeepLabV3_MobileNet_V3_Large_Weights.COCO_WITH_VOC_LABELS_V1
-            self.model = segm_models.deeplabv3_mobilenet_v3_large(weights=weights)
+            self.model = segm_models.deeplabv3_mobilenet_v3_large(weights=weights, aux_loss=aux_loss)
         else:
-            self.model = segm_models.deeplabv3_mobilenet_v3_large(weights=None)
+            self.model = segm_models.deeplabv3_mobilenet_v3_large(weights=None, aux_loss=aux_loss)
 
-        self.model.classifier[4] = nn.Conv2d(256, num_classes, 1)
+        # Replace the final classification layer for your # of classes
+        self.model.classifier[4] = nn.Conv2d(256, num_classes, kernel_size=1)
 
     def forward(self, x):
+        # returns a dict: {'out': mainOutput, 'aux': auxOutput} if aux_loss=True
         return self.model(x)
 
 class PhaseRecognitionNet(nn.Module):
