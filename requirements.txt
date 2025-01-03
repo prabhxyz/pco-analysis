@@ -1,8 +1,8 @@
 torch
 torchvision
-torchaudio
-timm
-transformers
 opencv-python
+pillow
+albumentations
 tqdm
-numpy
+transformers
+accelerate
