@@ -2,6 +2,4 @@
 /_pycache_/
 /.idea/
 /venv/
-/cataract-1k/
-/datasets/
-cataract_seg_model.pth
+/training/datasets/

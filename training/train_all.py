@@ -42,14 +42,14 @@ def train_segmentation(model, train_loader, val_loader, device, epochs=10, lr=1e
     model.train()
     for epoch in range(1, epochs+1):
         model.train()
-        running_loss=0
+        running_loss = 0
         pbar = tqdm(train_loader, desc=f"Seg Epoch {epoch}/{epochs}")
         for imgs, masks in pbar:
             imgs = imgs.to(device)
             masks = masks.to(device)
 
             optimizer.zero_grad()
-            with torch.amp.autocast(device_type=device.type, enabled=(device.type=="cuda")):
+            with torch.amp.autocast(enabled=(device.type=="cuda")):
                 out = model(imgs)["out"]
                 loss = criterion(out, masks)
 
@@ -60,14 +60,14 @@ def train_segmentation(model, train_loader, val_loader, device, epochs=10, lr=1e
             running_loss += loss.item()
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
-        train_loss = running_loss/len(train_loader)
+        train_loss = running_loss / len(train_loader)
         val_loss = validate_segmentation(model, val_loader, device, criterion)
         scheduler.step(val_loss)
         print(f"Epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
 
 def validate_segmentation(model, val_loader, device, criterion):
     model.eval()
-    losses=[]
+    losses = []
     with torch.no_grad():
         for imgs, masks in val_loader:
             imgs = imgs.to(device)
@@ -75,7 +75,7 @@ def validate_segmentation(model, val_loader, device, criterion):
             out = model(imgs)["out"]
             loss = criterion(out, masks)
             losses.append(loss.item())
-    return sum(losses)/len(losses)
+    return sum(losses) / len(losses)
 
 def train_phase(model, train_loader, val_loader, device, epochs=10, lr=1e-4):
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -91,7 +91,7 @@ def train_phase(model, train_loader, val_loader, device, epochs=10, lr=1e-4):
             label = label.to(device)
 
             optimizer.zero_grad()
-            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+            with torch.amp.autocast(enabled=(device.type=="cuda")):
                 out = model(frames)
                 loss = criterion(out, label)
 
@@ -101,20 +101,21 @@ def train_phase(model, train_loader, val_loader, device, epochs=10, lr=1e-4):
             running_loss += loss.item()
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
-        train_loss = running_loss/len(train_loader)
+        train_loss = running_loss / len(train_loader)
         val_loss = validate_phase(model, val_loader, device, criterion)
         print(f"Epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
 
 def validate_phase(model, val_loader, device, criterion):
     model.eval()
-    losses=[]
+    losses = []
     with torch.no_grad():
-        for frames,label in val_loader:
-            frames,label = frames.to(device), label.to(device)
+        for frames, label in val_loader:
+            frames = frames.to(device)
+            label = label.to(device)
             out = model(frames)
             loss = criterion(out, label)
             losses.append(loss.item())
-    return sum(losses)/len(losses)
+    return sum(losses) / len(losses)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -132,12 +133,10 @@ def main():
 
     num_workers = 1
 
-    # ----- SEGMENTATION TRAINING -----
     seg_transform = get_seg_transforms()
     seg_dataset = CataractSegDataset(root_dir=args.seg_data_root, transform=seg_transform)
     seg_len = len(seg_dataset)
     print(f"Seg dataset length = {seg_len}")
-
     if seg_len == 0 or args.seg_epochs == 0:
         print("Skipping segmentation (no data or 0 epochs).")
     else:
@@ -147,18 +146,17 @@ def main():
         seg_train_loader = DataLoader(seg_train, batch_size=args.batch_size, shuffle=True, num_workers=num_workers)
         seg_val_loader   = DataLoader(seg_val,   batch_size=args.batch_size, shuffle=False, num_workers=num_workers)
 
-        seg_model = LightweightSegModel(num_classes=NUM_SEG_CLASSES, use_pretrained=True).to(device)
+        seg_model = LightweightSegModel(num_classes=NUM_SEG_CLASSES, use_pretrained=True, aux_loss=True).to(device)
         print("Training Segmentation Model...")
         train_segmentation(seg_model, seg_train_loader, seg_val_loader, device, epochs=args.seg_epochs, lr=args.lr)
-        torch.save(seg_model.state_dict(), "lightweight_seg.pth")
+        torch.save(seg_model.state_dict(), "../lightweight_seg.pth")
         print("Saved lightweight_seg.pth")
 
-    # ----- PHASE RECOGNITION TRAINING -----
+    # Phase training
     phase_transform = get_phase_transforms()
     phase_dataset = CataractPhaseDataset(root_dir=args.phase_data_root, transform=phase_transform)
     phase_len = len(phase_dataset)
     print(f"Phase dataset length = {phase_len}")
-
     if phase_len == 0 or args.phase_epochs == 0:
         print("Skipping phase recognition (no data or 0 epochs).")
     else:
@@ -172,7 +170,7 @@ def main():
         phase_model = PhaseRecognitionNet(num_phases=num_phases, use_pretrained=True).to(device)
         print("Training Phase Recognition Model...")
         train_phase(phase_model, phase_train_loader, phase_val_loader, device, epochs=args.phase_epochs, lr=args.lr)
-        torch.save(phase_model.state_dict(), "phase_recognition.pth")
+        torch.save(phase_model.state_dict(), "../phase_recognition.pth")
         print("Saved phase_recognition.pth")
 
 if __name__ == "__main__":

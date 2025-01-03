@@ -6,8 +6,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from PIL import Image
+import albumentations as A
 
-# My classes: 0=Background + 12 instrument classes
 INSTRUMENT_CLASSES = {
     "Background": 0,
     "Iris": 1,
@@ -27,21 +27,20 @@ NUM_SEG_CLASSES = len(INSTRUMENT_CLASSES)
 
 def create_seg_mask(height, width, objects):
     """
-    Convert polygon annotations into a mask of shape (height, width).
+    Converts polygon annotations into an HxW mask of class IDs.
     """
     mask = np.zeros((height, width), dtype=np.uint8)
     for obj in objects:
-        ctitle = obj["classTitle"]
-        cid = INSTRUMENT_CLASSES.get(ctitle, 0)
-        pts = obj["points"]["exterior"]  # e.g. [(x1,y1), (x2,y2), ...]
+        class_name = obj["classTitle"]
+        cid = INSTRUMENT_CLASSES.get(class_name, 0)
+        pts = obj["points"]["exterior"]
         poly = np.array(pts, dtype=np.int32)
         cv2.fillPoly(mask, [poly], color=cid)
     return mask
 
 class CataractSegDataset(Dataset):
     """
-    Loads frames + polygon annotations for segmentation.
-    We rely on an Albumentations transform that can handle (image=..., mask=...).
+    Dataset for segmentation that loads PNG frames and polygon annotations.
     """
     def __init__(self, root_dir, transform=None):
         super().__init__()
@@ -66,29 +65,23 @@ class CataractSegDataset(Dataset):
 
     def __getitem__(self, idx):
         img_path, ann_path = self.samples[idx]
-        # Load image
         image_pil = Image.open(img_path).convert("RGB")
-        image_np = np.array(image_pil, dtype=np.uint8)  # Convert to NumPy
+        image_np = np.array(image_pil, dtype=np.uint8)
 
-        # Load annotation
         with open(ann_path, "r") as f:
             data = json.load(f)
         h = data["size"]["height"]
         w = data["size"]["width"]
         objs = data["objects"]
-        mask_np = create_seg_mask(h, w, objs)  # shape (h, w)
+        mask_np = create_seg_mask(h, w, objs)
 
-        # Albumentations expects 'image=..., mask=...'
         if self.transform:
             transformed = self.transform(image=image_np, mask=mask_np)
-            image_np = transformed["image"]  # now a tensor
-            mask_np = transformed["mask"]    # also a tensor if we used ToTensorV2()
+            image_tensor = transformed["image"]
+            mask_tensor = transformed["mask"].long()
         else:
-            # Fallback, if no transform, just do manual conversion to tensor
-            image_np = torch.from_numpy(image_np.transpose(2,0,1)).float()/255.
-            mask_np = torch.from_numpy(mask_np)
+            # Minimal fallback
+            image_tensor = torch.from_numpy(image_np.transpose(2,0,1)).float() / 255.
+            mask_tensor = torch.from_numpy(mask_np).long()
 
-        # mask should be long() for CE Loss
-        mask_tensor = mask_np.long()
-
-        return image_np, mask_tensor
+        return image_tensor, mask_tensor
