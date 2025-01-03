@@ -1,221 +1,166 @@
 # Vision-Language Models To Prevent Posterior Capsule Opacification (PCO)
 
-### ⚠️ The project is currently a work in progress, and the README is outdated.
+## Project Files Overview
 
-## Table of Contents
+### **1) `cataract_seg_dataset.py`**
 
-- [Overview](#overview)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Project Structure](#project-structure)
-- [Models](#models)
-- [Training](#training)
-- [Inference](#inference)
-- [Contributing](#contributing)
-- [License](#license)
-- [Acknowledgments](#acknowledgments)
+Handles loading the segmentation dataset to train models that identify surgical instruments in video frames.
 
-## Overview
+- **Key Features**:
+  - Maps instrument classes (e.g., "Pupil", "PhacoTip") to integer IDs.
+  - Converts polygon annotations into pixel-wise segmentation masks.
+  - Applies data augmentation using **Albumentations**.
+- **Purpose**: Prepares `(image_tensor, mask_tensor)` pairs for training segmentation models.
 
-The **Real-Time Surgical Guidance System** is an advanced tool designed to assist surgeons during cataract surgery by analyzing live video feeds and providing immediate feedback on surgical techniques. Leveraging state-of-the-art machine learning models, the system identifies subtle variations in surgical maneuvers, correlates them with risk factors for Posterior Capsule Opacification (PCO) development, and offers actionable insights to enhance surgical outcomes.
+---
 
-## Features
+### **2) `cataract_phase_dataset.py`**
 
-- **Real-Time Analysis:** Processes surgical video feeds in real-time to provide instant feedback.
-- **Technique Assessment:** Evaluates surgical maneuvers across all procedure phases, identifying areas for improvement.
-- **PCO Risk Prediction:** Predicts the likelihood of PCO development based on intraoperative observations.
-- **Actionable Insights:** Offers recommendations to refine surgical techniques and minimize post-operative complications.
-- **Training Tool:** Serves as an educational platform for new surgeons, accelerating the learning curve with personalized feedback.
-- **Modular Design:** Comprises distinct modules for dataset handling, segmentation and tracking, vision-language processing, and pipeline orchestration.
+Handles loading the phase recognition dataset, linking annotation CSVs with corresponding surgical videos.
 
-## Architecture
+- **Key Features**:
+  - Extracts and samples video frames from annotated phases (e.g., “Incision”).
+  - Assigns integer labels to surgical phases.
+  - Ensures balanced sampling to reduce redundancy.
+- **Purpose**: Prepares `(frame_tensor, phase_label)` pairs for training phase recognition models.
 
-The system is divided into four primary components:
+---
 
-1. **Dataset Management (`cataract_dataset.py`):** Handles data loading and preprocessing for the cataract-1k dataset.
-2. **Segmentation & Tracking (`segmentation_tracking.py`):** Performs image segmentation and tracks regions of interest using optical flow.
-3. **Vision-Language Processing (`vision_language.py`):** Combines visual and textual data to assess surgical techniques and predict PCO risk.
-4. **Main Pipeline (`main_pipeline.py`):** Orchestrates data flow, model training, and inference processes.
+### **3) `models.py`**
 
-## Installation
+Contains PyTorch implementations of the models used for segmentation and phase recognition.
 
-### Prerequisites
+- **Models**:
+  - `LightweightSegModel`: A **DeepLabv3** model with a **MobileNetV3** backbone for instrument segmentation.
+  - `PhaseRecognitionNet`: A **MobileNetV3-Large** model for classifying surgical phases.
+- **Purpose**: Provides lightweight, real-time capable architectures optimized for cataract surgery data.
 
-- **Python 3.9+**
-- **CUDA-enabled GPU** (optional but recommended for faster processing)
+---
 
-### Steps
+### **4) `technique_assessment.py`**
 
-1. **Clone the Repository:**
-    ```
-    git clone https://github.com/prabhxyz/pco-analysis.git
-    cd real-time-surgical-guidance
-   ```
+Implements heuristic-based **technique feedback** using recognized phases and instrument presence.
 
-2. **Set Up the Project Structure:**
-    Ensure your project directory has the following structure:
-    ```
-    your_project/
-    ├── cataract_dataset.py
-    ├── segmentation_tracking.py
-    ├── vision_language.py
-    ├── main_pipeline.py
-    └── cataract-1k/
-        ├── images/   # Place your surgical video frames here
-        └── masks/    # Place corresponding segmentation masks here
-    ```
+- **Example Rules**:
+  - If phase = "Incision" but no "SlitKnife" detected, warn about missing instruments.
+  - If phase = "Phacoemulsification" but no "PhacoTip," suggest potential issues.
+- **Purpose**: Offers actionable feedback during surgery based on predefined rules.
 
-3. **Create and Activate a Conda Environment:**
-    ```
-    conda create -n cataract_env python=3.9 -y
-    conda activate cataract_env
-    ```
+---
 
-4. **Install Dependencies:**
-    ```
-    pip install torch torchvision torchaudio timm transformers opencv-python tqdm numpy
-    ```
+### **5) `pco_assessment.py`**
 
-## Usage
+Estimates **PCO risk** using domain knowledge heuristics.
 
-### Running the Pipeline
+- **Example Rules**:
+  - If "IrrigationAspiration" is missing, flag higher PCO risk.
+  - Tracks whether critical steps like "Capsule Polishing" were performed.
+- **Output**: Provides a simple risk estimate: “Low,” “Medium,” or “High.”
 
-Execute the main pipeline script to train the models and run an example inference:
+---
 
-```
-python main_pipeline.py
-```
+### **6) `assistant.py`**
 
-### Expected Output
+A minimal **chat assistant** for interacting with the system during surgery.
 
-Upon running the pipeline, you will observe logs indicating the progress of:
+- **Capabilities**:
+  - Answers queries about the current phase, instruments, or PCO risk.
+  - Simple rule-based text matching (can be extended with NLP models).
+- **Purpose**: Facilitates user interaction during real-time inference.
 
-- **Segmentation Model Training**
-- **Vision-Language Model Training**
-- **Inference Steps:**
-  - Segmentation
-  - Optical Flow Calculation
-  - Region-Based Tracking
-  - Technique Assessment
-  - PCO Risk Prediction
+---
 
-### Important Notes
+### **7) `train_all.py`**
 
-> **Disclaimer:** This prototype uses placeholders for the **cataract-1k** dataset. Modify the dataset paths and structure to match your real data.
->
-> - **Data Requirements:** Ensure minimal data is provided, or the system will use mock data for demonstration.
-> - **Medical Validation:** This system is **not** medically validated. Use with caution and consult medical professionals for clinical applications.
+A unified training pipeline for segmentation and phase recognition models.
 
-## Project Structure
+- **Features**:
+  - Accepts command-line arguments for dataset paths, hyperparameters, and model configurations.
+  - Supports data augmentation, mixed-precision training, and learning rate scheduling.
+  - Saves trained models as `lightweight_seg.pth` and `phase_recognition.pth`.
+- **Purpose**: Streamlines the training process for both tasks.
 
-```
-real-time-surgical-guidance/
-├── cataract_dataset.py       # Dataset handling and DataLoader creation
-├── segmentation_tracking.py  # Segmentation and tracking modules
-├── vision_language.py        # Vision-Language model and related heads
-├── main_pipeline.py          # Orchestrates training and inference
-├── cataract-1k/              # Dataset directory
-│   ├── images/               # Surgical video frames
-│   └── masks/                # Segmentation masks
-└── README.md                 # Project documentation
+---
+
+### **8) `real_time_demo.py`**
+
+Demonstrates real-time inference by integrating segmentation, phase recognition, and feedback modules.
+
+- **Workflow**:
+  - Loads trained models and processes video or live camera feeds.
+  - Displays overlays (segmentation masks, phase labels) on video frames.
+  - Provides real-time feedback on technique and PCO risk.
+  - Optional terminal-based chat for user queries.
+- **Purpose**: Showcases the system's real-time capabilities.
+
+---
+
+## **Getting Started**
+
+### **Data Preparation**
+
+1. Organize data in the following structure:
+   - `datasets/Cataract-1k/segmentation`: Instrument segmentation frames + JSON annotations.
+   - `datasets/Cataract-1k/phase`: Videos and corresponding phase annotation CSVs.
+
+---
+
+### **Training**
+
+Train the segmentation and phase recognition models using `train_all.py`:
+
+```bash
+python train_all.py --seg_data_root datasets/Cataract-1k/segmentation \
+                    --phase_data_root datasets/Cataract-1k/phase \
+                    --seg_epochs 10 \
+                    --phase_epochs 12 \
+                    --batch_size 8 \
+                    --lr 1e-4
 ```
 
-### File Descriptions
+- **Outputs**:
+  - `lightweight_seg.pth`: Segmentation model weights.
+  - `phase_recognition.pth`: Phase recognition model weights.
 
-- **`cataract_dataset.py`:**
-  - **`Cataract1KDataset`**: Simulates the dataset structure for cataract surgery videos.
-  - **`get_cataract_dataloaders`**: Creates training and validation DataLoaders.
+---
 
-- **`segmentation_tracking.py`:**
-  - **`SimpleSegmentationModel`**: DeepLabV3-based segmentation model with a ResNet50 backbone.
-  - **Training Functions**: Train and perform inference with the segmentation model.
-  - **Optical Flow**: Computes optical flow using OpenCV’s Farneback method.
-  - **Region-Based Tracking**: Identifies and tracks the centroid of the largest segmented region.
+### **Real-Time Inference**
 
-- **`vision_language.py`:**
-  - **`VisionLanguageModel`**: Combines ViT (Vision Transformer) and BERT for vision-language tasks.
-  - **`TechniqueAssessmentHead`**: Assesses surgical quality indices.
-  - **`PCORiskPredictionHead`**: Predicts the probability of PCO development.
-  - **Training Functions**: Train the Vision-Language model using contrastive learning.
-  - **Inference Functions**: Perform technique assessment and PCO risk prediction.
+Run real-time inference with `real_time_demo.py`:
 
-- **`main_pipeline.py`:**
-  - **Workflow Orchestration**: Loads data, initializes models, trains segmentation and vision-language models, and performs inference.
+```bash
+python real_time_demo.py --video /path/to/video.mp4 \
+                         --seg_model lightweight_seg.pth \
+                         --phase_model phase_recognition.pth \
+                         --chat
+```
 
-## Models
+- **Features**:
+  - Overlays segmentation results on video frames.
+  - Classifies surgical phases and provides real-time feedback.
+  - Enables text-based interaction for queries about phase or PCO risk.
 
-### Segmentation Model
+---
 
-- **Architecture:** DeepLabV3 with ResNet50 backbone.
-- **Purpose:** Segment surgical instruments and anatomical structures in video frames.
-- **Training:** Utilizes cross-entropy loss for binary segmentation (background vs. instrument).
+## **Technical Highlights**
 
-### Vision-Language Model
+1. **Deep Learning Models**:
+   - **DeepLabv3 + MobileNetV3** for segmentation.
+   - **MobileNetV3-Large** for phase classification.
+2. **Mixed-Precision Training**:
+   - Accelerates training with lower memory consumption using `torch.amp`.
+3. **Data Augmentation**:
+   - Robust augmentations via **Albumentations** to improve model generalization.
+4. **Heuristic Modules**:
+   - Provides immediate insights into surgical technique and PCO risk.
 
-- **Architecture:** Combines Vision Transformer (ViT) and BERT.
-- **Purpose:** Aligns visual features with textual surgical notes for technique assessment and PCO risk prediction.
-- **Training:** Uses a contrastive loss similar to CLIP to align image and text embeddings.
+---
 
-### Assessment and Prediction Heads
+## **Future Improvements**
 
-- **TechniqueAssessmentHead:** Outputs vectors representing surgical quality indices, predicted errors, and recommended adjustments.
-- **PCORiskPredictionHead:** Outputs the probability of PCO development based on fused embeddings.
-
-## Training
-
-### Segmentation Model Training
-
-The segmentation model is trained using the `train_segmentation_model` function. It processes batches of images and masks, optimizing the model to accurately segment surgical instruments.
-
-### Vision-Language Model Training
-
-The Vision-Language model is trained using the `train_vlm` function. It aligns visual features from surgical frames with corresponding textual prompts, enabling the model to understand and assess surgical techniques.
-
-## Inference
-
-### Example Inference Flow
-
-1. **Segmentation:**
-   - The trained segmentation model processes input frames to generate segmentation masks.
-
-2. **Optical Flow Calculation:**
-   - Computes the motion between consecutive frames to analyze surgical maneuvers.
-
-3. **Region-Based Tracking:**
-   - Identifies and tracks the centroid of the largest segmented region, aiding in instrument tracking.
-
-4. **Technique Assessment:**
-   - Uses the Vision-Language model to assess the quality of surgical techniques based on visual and textual data.
-
-5. **PCO Risk Prediction:**
-   - Predicts the likelihood of PCO development, allowing proactive measures during surgery.
-
-### Running Inference
-
-The `main_pipeline.py` script demonstrates an example inference using a batch from the validation DataLoader. It showcases the integration of segmentation, optical flow, tracking, technique assessment, and PCO risk prediction.
-
-## Contributing
-
-Contributions are welcome! Please follow these steps:
-
-1. **Fork the Repository**
-2. **Create a Feature Branch**
-    ```
-    git checkout -b feature/YourFeature
-    ```
-3. **Commit Your Changes**
-    ```
-    git commit -m "Add Your Feature"
-    ```
-4. **Push to the Branch**
-    ```
-    git push origin feature/YourFeature
-    ```
-5. **Open a Pull Request**
-
-Please ensure that your contributions adhere to the project's coding standards and include appropriate documentation and tests.
+- Replace heuristic modules with data-driven models for technique assessment and PCO risk.
+- Integrate NLP-based language models into `assistant.py` for advanced dialogue capabilities.
+- Expand the dataset to cover more surgical cases and phases for better generalization.
 
 ## License
 
