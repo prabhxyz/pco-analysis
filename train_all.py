@@ -130,41 +130,50 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     cudnn.benchmark = True
 
-    # If we want to silence the "max number of worker" warning or avoid overhead, set e.g. num_workers=1
-    num_workers=1
+    num_workers = 1
 
-    # 1) Seg dataset
+    # ----- SEGMENTATION TRAINING -----
     seg_transform = get_seg_transforms()
     seg_dataset = CataractSegDataset(root_dir=args.seg_data_root, transform=seg_transform)
-    val_size = int(0.2 * len(seg_dataset))
-    train_size = len(seg_dataset) - val_size
-    seg_train, seg_val = random_split(seg_dataset, [train_size, val_size])
-    seg_train_loader = DataLoader(seg_train, batch_size=args.batch_size, shuffle=True, num_workers=num_workers)
-    seg_val_loader   = DataLoader(seg_val,   batch_size=args.batch_size, shuffle=False, num_workers=num_workers)
+    seg_len = len(seg_dataset)
+    print(f"Seg dataset length = {seg_len}")
 
-    # 2) Train segmentation
-    seg_model = LightweightSegModel(num_classes=NUM_SEG_CLASSES, use_pretrained=True).to(device)
-    print("Training Segmentation Model...")
-    train_segmentation(seg_model, seg_train_loader, seg_val_loader, device, epochs=args.seg_epochs, lr=args.lr)
-    torch.save(seg_model.state_dict(), "lightweight_seg.pth")
-    print("Saved lightweight_seg.pth")
+    if seg_len == 0 or args.seg_epochs == 0:
+        print("Skipping segmentation (no data or 0 epochs).")
+    else:
+        val_size = int(0.2 * seg_len)
+        train_size = seg_len - val_size
+        seg_train, seg_val = random_split(seg_dataset, [train_size, val_size])
+        seg_train_loader = DataLoader(seg_train, batch_size=args.batch_size, shuffle=True, num_workers=num_workers)
+        seg_val_loader   = DataLoader(seg_val,   batch_size=args.batch_size, shuffle=False, num_workers=num_workers)
 
-    # 3) Phase dataset
+        seg_model = LightweightSegModel(num_classes=NUM_SEG_CLASSES, use_pretrained=True).to(device)
+        print("Training Segmentation Model...")
+        train_segmentation(seg_model, seg_train_loader, seg_val_loader, device, epochs=args.seg_epochs, lr=args.lr)
+        torch.save(seg_model.state_dict(), "lightweight_seg.pth")
+        print("Saved lightweight_seg.pth")
+
+    # ----- PHASE RECOGNITION TRAINING -----
     phase_transform = get_phase_transforms()
     phase_dataset = CataractPhaseDataset(root_dir=args.phase_data_root, transform=phase_transform)
-    val_size_p = int(0.2 * len(phase_dataset))
-    train_size_p = len(phase_dataset) - val_size_p
-    phase_train, phase_val = random_split(phase_dataset, [train_size_p, val_size_p])
-    phase_train_loader = DataLoader(phase_train, batch_size=args.batch_size, shuffle=True, num_workers=num_workers)
-    phase_val_loader   = DataLoader(phase_val,   batch_size=args.batch_size, shuffle=False, num_workers=num_workers)
+    phase_len = len(phase_dataset)
+    print(f"Phase dataset length = {phase_len}")
 
-    # 4) Train phase recognition
-    num_phases = len(phase_dataset.phase_label_map)  # from the dataset
-    phase_model = PhaseRecognitionNet(num_phases=num_phases, use_pretrained=True).to(device)
-    print("Training Phase Recognition Model...")
-    train_phase(phase_model, phase_train_loader, phase_val_loader, device, epochs=args.phase_epochs, lr=args.lr)
-    torch.save(phase_model.state_dict(), "phase_recognition.pth")
-    print("Saved phase_recognition.pth")
+    if phase_len == 0 or args.phase_epochs == 0:
+        print("Skipping phase recognition (no data or 0 epochs).")
+    else:
+        val_size_p = int(0.2 * phase_len)
+        train_size_p = phase_len - val_size_p
+        phase_train, phase_val = random_split(phase_dataset, [train_size_p, val_size_p])
+        phase_train_loader = DataLoader(phase_train, batch_size=args.batch_size, shuffle=True, num_workers=num_workers)
+        phase_val_loader   = DataLoader(phase_val,   batch_size=args.batch_size, shuffle=False, num_workers=num_workers)
+
+        num_phases = len(phase_dataset.phase_label_map)
+        phase_model = PhaseRecognitionNet(num_phases=num_phases, use_pretrained=True).to(device)
+        print("Training Phase Recognition Model...")
+        train_phase(phase_model, phase_train_loader, phase_val_loader, device, epochs=args.phase_epochs, lr=args.lr)
+        torch.save(phase_model.state_dict(), "phase_recognition.pth")
+        print("Saved phase_recognition.pth")
 
 if __name__ == "__main__":
     main()
